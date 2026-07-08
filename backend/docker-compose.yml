@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: communication_trainer
+      # Allows TCP connections without password for local development.
+      # Remove or set to scram-sha-256 in any non-local environment.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      # 5432 is occupied by a local PostgreSQL installation on Windows.
+      # Docker maps to 5433 on the host to avoid the conflict.
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d communication_trainer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
