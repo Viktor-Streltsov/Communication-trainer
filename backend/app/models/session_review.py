@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import ForeignKey, Text
+from sqlalchemy import ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,7 +15,13 @@ class SessionReview(Base):
         ForeignKey("sessions.id", ondelete="CASCADE"), unique=True, nullable=False
     )
     summary_text: Mapped[str] = mapped_column(Text, nullable=False)
-    # Lists of strings stored as JSONB for flexibility
+
+    # Score + rich text fields (added in migration 0002)
+    success_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    overall_impression: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    motivational_message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    # Structured feedback stored as JSONB
     strengths: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     weak_points: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     suggested_phrasings: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)

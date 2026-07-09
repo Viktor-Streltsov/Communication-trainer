@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -9,7 +10,10 @@ from app.db import get_db
 from app.models.message import Message
 from app.models.scenario import Scenario
 from app.models.session import Session as ChatSession
+from app.models.session_review import SessionReview
+from app.services.analysis import analyse_session
 from app.services.llm_client import llm_client
+from app.services.persona_prompts import DIFFICULTY_MODIFIERS
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -19,7 +23,8 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # ------------------------------------------------------------------
 
 class StartRequest(BaseModel):
-    scenario_id: str  # scenario code, e.g. "interview_strict"
+    scenario_id: str   # scenario code, e.g. "interview_strict"
+    difficulty: str = "medium"  # "soft" | "medium" | "hard"
 
 
 class StartResponse(BaseModel):
@@ -37,6 +42,31 @@ class MessageRequest(BaseModel):
 class MessageResponse(BaseModel):
     session_id: str
     message: str       # persona's reply
+
+
+class EndRequest(BaseModel):
+    session_id: str
+
+
+class WeakPoint(BaseModel):
+    phrase: str = ""
+    problem: str = ""
+
+
+class SuggestedPhrasing(BaseModel):
+    original: str = ""
+    improved: str = ""
+
+
+class ReviewResponse(BaseModel):
+    session_id: str
+    summary_text: str
+    success_score: int
+    overall_impression: str
+    strengths: list
+    weak_points: list
+    suggested_phrasings: list
+    motivational_message: str
 
 
 # ------------------------------------------------------------------
@@ -61,7 +91,8 @@ async def start_session(
                    "Check GET /chat/scenarios for available options.",
         )
 
-    session = ChatSession(scenario_id=scenario.id)
+    difficulty = body.difficulty if body.difficulty in ("soft", "medium", "hard") else "medium"
+    session = ChatSession(scenario_id=scenario.id, difficulty=difficulty)
     db.add(session)
     await db.flush()  # get session.id before adding messages
 
@@ -122,8 +153,10 @@ async def send_message(
     )
     db_messages = msgs_result.scalars().all()
 
-    # Build LLM context: system prompt + conversation turns
-    llm_history = [{"role": "system", "content": scenario.system_prompt}]
+    # Build LLM context: system prompt + difficulty modifier + conversation turns
+    difficulty_modifier = DIFFICULTY_MODIFIERS.get(session.difficulty, "")
+    effective_prompt = scenario.system_prompt + difficulty_modifier
+    llm_history = [{"role": "system", "content": effective_prompt}]
     for msg in db_messages:
         role = "user" if msg.sender == "user" else "assistant"
         llm_history.append({"role": role, "content": msg.text})
@@ -143,12 +176,132 @@ async def send_message(
     return MessageResponse(session_id=body.session_id, message=reply)
 
 
+@router.post("/end", response_model=ReviewResponse)
+async def end_session(
+    body: EndRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ReviewResponse:
+    """
+    Mark the session as finished, run the AI coach analysis, persist the
+    SessionReview, and return the structured feedback.
+    """
+    try:
+        session_uuid = uuid.UUID(body.session_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="session_id must be a valid UUID.")
+
+    # Load session
+    session_result = await db.execute(
+        select(ChatSession).where(ChatSession.id == session_uuid)
+    )
+    session = session_result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if session.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Session is already '{session.status}'. Cannot end it again.",
+        )
+
+    # Check whether a review was already saved (e.g. concurrent request)
+    existing_review = await db.execute(
+        select(SessionReview).where(SessionReview.session_id == session_uuid)
+    )
+    if existing_review.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409, detail="A review for this session already exists."
+        )
+
+    # Mark session finished
+    session.status = "finished"
+    session.ended_at = datetime.now(timezone.utc)
+    await db.flush()
+
+    # Load full message history
+    msgs_result = await db.execute(
+        select(Message)
+        .where(Message.session_id == session_uuid)
+        .order_by(Message.created_at)
+    )
+    messages = msgs_result.scalars().all()
+
+    # Run AI coach analysis
+    try:
+        result = await analyse_session(list(messages))
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=502, detail=f"Coach analysis failed: {exc}") from exc
+
+    # Persist review
+    review = SessionReview(
+        session_id=session_uuid,
+        summary_text=result.summary_text,
+        success_score=result.success_score,
+        overall_impression=result.overall_impression,
+        strengths=result.strengths,
+        weak_points=result.weak_points,
+        suggested_phrasings=result.suggested_phrasings,
+        motivational_message=result.motivational_message,
+    )
+    db.add(review)
+    await db.commit()
+
+    return ReviewResponse(
+        session_id=body.session_id,
+        summary_text=result.summary_text,
+        success_score=result.success_score,
+        overall_impression=result.overall_impression,
+        strengths=result.strengths,
+        weak_points=result.weak_points,
+        suggested_phrasings=result.suggested_phrasings,
+        motivational_message=result.motivational_message,
+    )
+
+
+@router.get("/session/{session_id}/review", response_model=ReviewResponse)
+async def get_review(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ReviewResponse:
+    """Return the saved coach review for a finished session."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="session_id must be a valid UUID.")
+
+    review_result = await db.execute(
+        select(SessionReview).where(SessionReview.session_id == session_uuid)
+    )
+    review = review_result.scalar_one_or_none()
+    if review is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Review not found. The session may not be finished yet.",
+        )
+
+    return ReviewResponse(
+        session_id=session_id,
+        summary_text=review.summary_text,
+        success_score=review.success_score,
+        overall_impression=review.overall_impression,
+        strengths=review.strengths,
+        weak_points=review.weak_points,
+        suggested_phrasings=review.suggested_phrasings,
+        motivational_message=review.motivational_message,
+    )
+
+
 @router.get("/scenarios")
 async def list_scenarios(db: AsyncSession = Depends(get_db)) -> list[dict]:
     """Return all available scenarios from the database."""
     result = await db.execute(select(Scenario).order_by(Scenario.title))
     scenarios = result.scalars().all()
     return [
-        {"scenario_id": s.code, "display_name": s.title, "strictness": s.strictness}
+        {
+            "scenario_id": s.code,
+            "display_name": s.title,
+            "strictness": s.strictness,
+            "short_description": s.short_description,
+        }
         for s in scenarios
     ]

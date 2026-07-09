@@ -24,3 +24,5 @@ class Session(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # "active" | "finished" | "abandoned"
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    # "soft" | "medium" | "hard" — controls persona aggressiveness modifier
+    difficulty: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")

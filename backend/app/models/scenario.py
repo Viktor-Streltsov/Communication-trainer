@@ -19,3 +19,4 @@ class Scenario(Base):
     strictness: Mapped[str] = mapped_column(String(32), nullable=False)
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     opening_line: Mapped[str] = mapped_column(Text, nullable=False)
+    short_description: Mapped[str] = mapped_column(Text, nullable=False, default="")
