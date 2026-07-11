@@ -26,3 +26,6 @@ class Session(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     # "soft" | "medium" | "hard" — controls persona aggressiveness modifier
     difficulty: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
+    # Hidden per-session character trait injected into the system prompt.
+    # Never exposed during the dialogue; revealed as a post-session insight.
+    random_trait: Mapped[str | None] = mapped_column(nullable=True)

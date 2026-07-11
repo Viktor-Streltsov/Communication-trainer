@@ -25,3 +25,7 @@ class SessionReview(Base):
     strengths: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     weak_points: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     suggested_phrasings: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+    # Post-session insight: user-friendly reframing of the hidden random_trait.
+    # Shown only after the session ends, never during the dialogue.
+    revealed_trait: Mapped[str | None] = mapped_column(Text, nullable=True)

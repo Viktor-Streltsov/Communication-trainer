@@ -14,6 +14,7 @@ from app.models.session_review import SessionReview
 from app.services.analysis import analyse_session
 from app.services.llm_client import llm_client
 from app.services.persona_prompts import DIFFICULTY_MODIFIERS
+from app.services.random_traits import pick_trait, revealed_hint
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -67,6 +68,8 @@ class ReviewResponse(BaseModel):
     weak_points: list
     suggested_phrasings: list
     motivational_message: str
+    # Post-session character insight; None for legacy sessions without a trait.
+    revealed_trait: str | None = None
 
 
 # ------------------------------------------------------------------
@@ -92,7 +95,8 @@ async def start_session(
         )
 
     difficulty = body.difficulty if body.difficulty in ("soft", "medium", "hard") else "medium"
-    session = ChatSession(scenario_id=scenario.id, difficulty=difficulty)
+    trait = pick_trait(scenario.role_type)
+    session = ChatSession(scenario_id=scenario.id, difficulty=difficulty, random_trait=trait or None)
     db.add(session)
     await db.flush()  # get session.id before adding messages
 
@@ -153,9 +157,10 @@ async def send_message(
     )
     db_messages = msgs_result.scalars().all()
 
-    # Build LLM context: system prompt + difficulty modifier + conversation turns
+    # Build LLM context: system prompt + difficulty modifier + random trait + turns
     difficulty_modifier = DIFFICULTY_MODIFIERS.get(session.difficulty, "")
-    effective_prompt = scenario.system_prompt + difficulty_modifier
+    trait_modifier = session.random_trait or ""
+    effective_prompt = scenario.system_prompt + difficulty_modifier + trait_modifier
     llm_history = [{"role": "system", "content": effective_prompt}]
     for msg in db_messages:
         role = "user" if msg.sender == "user" else "assistant"
@@ -232,6 +237,9 @@ async def end_session(
         await db.rollback()
         raise HTTPException(status_code=502, detail=f"Coach analysis failed: {exc}") from exc
 
+    # Build post-session character insight from the hidden random trait
+    hint = revealed_hint(session.random_trait or "")
+
     # Persist review
     review = SessionReview(
         session_id=session_uuid,
@@ -242,6 +250,7 @@ async def end_session(
         weak_points=result.weak_points,
         suggested_phrasings=result.suggested_phrasings,
         motivational_message=result.motivational_message,
+        revealed_trait=hint or None,
     )
     db.add(review)
     await db.commit()
@@ -255,6 +264,7 @@ async def end_session(
         weak_points=result.weak_points,
         suggested_phrasings=result.suggested_phrasings,
         motivational_message=result.motivational_message,
+        revealed_trait=hint or None,
     )
 
 
@@ -288,6 +298,7 @@ async def get_review(
         weak_points=review.weak_points,
         suggested_phrasings=review.suggested_phrasings,
         motivational_message=review.motivational_message,
+        revealed_trait=review.revealed_trait,
     )
 
 
