@@ -4,6 +4,8 @@
 // POST /chat/start.
 // ---------------------------------------------------------------------------
 
+import type { StrictnessVariant } from '../components/StrictnessBadge';
+
 export type Difficulty = 'soft' | 'medium' | 'hard';
 
 export interface PendingScenario {
@@ -14,6 +16,7 @@ export interface PendingScenario {
 
 interface DifficultySelectProps {
   scenario: PendingScenario;
+  variant: StrictnessVariant;
   onConfirm: (difficulty: Difficulty) => void;
   onBack: () => void;
 }
@@ -40,15 +43,25 @@ const OPTIONS: { value: Difficulty; label: string; note: string }[] = [
   },
 ];
 
+// Intensity scale: softer → more transparent, harder → fully opaque.
+const DOT_OPACITY: Record<Difficulty, string> = {
+  soft:   'opacity-30',
+  medium: 'opacity-60',
+  hard:   'opacity-100',
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export default function DifficultySelect({
   scenario,
+  variant,
   onConfirm,
   onBack,
 }: DifficultySelectProps) {
+  const dotColor = variant === 'calm' ? 'bg-accent-calm' : 'bg-accent-warm';
+
   return (
     <div className="min-h-screen bg-background flex flex-col px-6 py-section">
 
@@ -77,24 +90,31 @@ export default function DifficultySelect({
         Выбери сложность
       </p>
 
-      {/* Options */}
-      <ul className="flex flex-col" role="list">
+      {/* Options — card list, lifted off the background */}
+      <div className="flex flex-col gap-3">
         {OPTIONS.map((opt) => (
-          <li key={opt.value}>
-            <button
-              onClick={() => onConfirm(opt.value)}
-              className="w-full text-left py-block border-b border-text-secondary/15 last:border-0 flex flex-col gap-1 active:opacity-60 transition-opacity"
-            >
-              <span className="font-sans text-base text-text-primary font-medium">
-                {opt.label}
-              </span>
-              <span className="font-sans text-sm text-text-secondary leading-relaxed">
-                {opt.note}
-              </span>
-            </button>
-          </li>
+          <button
+            key={opt.value}
+            onClick={() => onConfirm(opt.value)}
+            className="w-full text-left bg-surface rounded-card px-4 py-[0.875rem]
+              flex flex-col gap-1
+              hover:shadow-sm active:scale-[0.98]
+              transition-all duration-150"
+          >
+            {/* Label row with intensity dot */}
+            <span className="inline-flex items-center gap-2 font-sans text-base text-text-primary font-medium">
+              <span
+                className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor} ${DOT_OPACITY[opt.value]}`}
+              />
+              {opt.label}
+            </span>
+            {/* Note indented to align with label text (dot 6px + gap 8px = 14px) */}
+            <span className="font-sans text-sm text-text-secondary leading-relaxed pl-[14px]">
+              {opt.note}
+            </span>
+          </button>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

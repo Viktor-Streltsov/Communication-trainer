@@ -185,6 +185,7 @@ export default function App() {
     return (
       <DifficultySelect
         scenario={pending}
+        variant={VARIANT_MAP[pending.scenario_id] ?? 'calm'}
         onConfirm={handleDifficultyConfirm}
         onBack={() => setScreen('home')}
       />

@@ -16,12 +16,14 @@ interface SuggestedPhrasing {
 
 export interface ReviewData {
   session_id: string;
+  summary_text: string;
   success_score: number;
   overall_impression: string;
   strengths: string[];
   weak_points: WeakPoint[];
   suggested_phrasings: SuggestedPhrasing[];
   motivational_message: string;
+  revealed_trait: string | null;
 }
 
 interface SessionReviewProps {
@@ -73,6 +75,7 @@ export default function SessionReview({
     weak_points,
     suggested_phrasings,
     motivational_message,
+    revealed_trait,
   } = review;
 
   return (
@@ -179,9 +182,21 @@ export default function SessionReview({
             </div>
           </section>
         ) : null}
+        {/* ── 7. Revealed trait (post-session insight) ─────────────────── */}
+        {revealed_trait ? (
+          <section className="mb-section">
+            <p className="font-sans text-xs text-text-secondary uppercase tracking-wide mb-3">
+              Закулисье
+            </p>
+            <p className="font-sans text-sm text-text-secondary leading-relaxed italic">
+              {revealed_trait}
+            </p>
+          </section>
+        ) : null}
+
       </main>
 
-      {/* ── 7. Fixed bottom buttons ───────────────────────────────────────── */}
+      {/* ── 8. Fixed bottom buttons ───────────────────────────────────────── */}
       <footer className="fixed bottom-0 left-0 right-0 bg-background px-6 py-5 flex flex-col gap-3">
         <button
           onClick={onHome}
