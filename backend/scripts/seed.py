@@ -35,39 +35,40 @@ async def seed() -> None:
 
     async with session_factory() as db:
         inserted = 0
-        skipped = 0
+        updated = 0
 
         for code, persona in PERSONAS.items():
             existing = await db.scalar(select(Scenario).where(Scenario.code == code))
-            if existing is not None:
-                # Update short_description in case it was added after initial seed
-                if not existing.short_description and persona.short_description:
-                    existing.short_description = persona.short_description
-                    print(f"  update {code!r} — refreshed short_description")
-                else:
-                    print(f"  skip   {code!r} — already exists")
-                skipped += 1
-                continue
 
-            meta = SCENARIO_META.get(code, {"role_type": "other", "strictness": "medium"})
-            db.add(
-                Scenario(
-                    code=code,
-                    title=persona.display_name,
-                    short_description=persona.short_description,
-                    role_type=meta["role_type"],
-                    strictness=meta["strictness"],
-                    system_prompt=persona.system_prompt,
-                    opening_line=persona.opening_line,
+            if existing is not None:
+                # Upsert: always refresh mutable fields so re-running seed
+                # propagates display_name / short_description changes to prod.
+                existing.title            = persona.display_name
+                existing.short_description = persona.short_description
+                existing.system_prompt    = persona.system_prompt
+                existing.opening_line     = persona.opening_line
+                print(f"  update {code!r}: {persona.display_name!r}")
+                updated += 1
+            else:
+                meta = SCENARIO_META.get(code, {"role_type": "other", "strictness": "medium"})
+                db.add(
+                    Scenario(
+                        code=code,
+                        title=persona.display_name,
+                        short_description=persona.short_description,
+                        role_type=meta["role_type"],
+                        strictness=meta["strictness"],
+                        system_prompt=persona.system_prompt,
+                        opening_line=persona.opening_line,
+                    )
                 )
-            )
-            print(f"  insert {code!r} — {persona.display_name}")
-            inserted += 1
+                print(f"  insert {code!r}: {persona.display_name!r}")
+                inserted += 1
 
         await db.commit()
 
     await engine.dispose()
-    print(f"\nDone: {inserted} inserted, {skipped} skipped.")
+    print(f"\nDone: {inserted} inserted, {updated} updated.")
 
 
 if __name__ == "__main__":
