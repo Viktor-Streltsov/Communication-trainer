@@ -16,7 +16,7 @@ import ProgressHistory from './screens/ProgressHistory';
 import CreateScenario from './screens/CreateScenario';
 import type { StrictnessLevel, StrictnessVariant } from './components/StrictnessBadge';
 import { storageGet, storageSet } from './services/storage';
-import { apiFetch, AUTH_TOKEN_KEY, AUTH_USER_KEY } from './services/api';
+import { apiFetch, AUTH_TOKEN_KEY } from './services/api';
 import {
   recordActivity,
   cancelReminder,
