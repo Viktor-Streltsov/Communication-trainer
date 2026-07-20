@@ -8,6 +8,10 @@ const config: CapacitorConfig = {
     SpeechRecognition: {
       // Keeps the mic permission request in-flow; the plugin handles the rest.
     },
+    LocalNotifications: {
+      smallIcon: 'ic_stat_icon_config_sample',
+      iconColor: '#3C4A3D',
+    },
   },
 };
 

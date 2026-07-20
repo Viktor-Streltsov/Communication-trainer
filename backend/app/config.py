@@ -27,5 +27,14 @@ class Settings(BaseSettings):
     app_port: int = 8000
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8100"]
 
+    # Email (Resend — https://resend.com, free tier, no card required)
+    resend_api_key: str = ""
+    resend_from_email: str = "noreply@resend.dev"
+
+    # JWT
+    jwt_secret: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24 * 30  # 30 days
+
 
 settings = Settings()

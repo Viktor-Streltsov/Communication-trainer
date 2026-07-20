@@ -4,6 +4,7 @@ import BreathingDot from '../components/BreathingDot';
 import StrictnessBadge from '../components/StrictnessBadge';
 import type { StrictnessLevel, StrictnessVariant } from '../components/StrictnessBadge';
 import type { PendingScenario } from './DifficultySelect';
+import { apiFetch } from '../services/api';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +32,10 @@ interface HomeProps {
   onResume: () => void;
   /** Called with the full scenario object so App can show DifficultySelect */
   onSelect: (scenario: PendingScenario) => void;
+  isLoggedIn?: boolean;
+  onLoginPress?: () => void;
+  onProgressPress?: () => void;
+  onCreateScenario?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,15 +100,14 @@ export function getTimeAwareGreeting(date: Date): Greeting {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function Home({ resumeSession, onResume, onSelect }: HomeProps) {
+export default function Home({ resumeSession, onResume, onSelect, isLoggedIn = false, onLoginPress, onProgressPress, onCreateScenario }: HomeProps) {
   const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
   const [loading, setLoading]     = useState(true);
 
-  const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
   const { title, subtitle } = getTimeAwareGreeting(new Date());
 
   useEffect(() => {
-    fetch(`${baseUrl}/chat/scenarios`)
+    apiFetch('/chat/scenarios')
       .then((r) => r.json() as Promise<{
         scenario_id: string;
         display_name: string;
@@ -123,7 +127,7 @@ export default function Home({ resumeSession, onResume, onSelect }: HomeProps) {
       )
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [baseUrl]);
+  }, []);
 
   const otherScenarios = resumeSession
     ? scenarios.filter((s) => s.scenario_id !== resumeSession.scenarioId)
@@ -131,7 +135,7 @@ export default function Home({ resumeSession, onResume, onSelect }: HomeProps) {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-background px-6 py-section">
+    <div className="min-h-screen bg-background px-6 py-section flex flex-col">
 
       {/* Greeting */}
       <header className="mb-section">
@@ -200,6 +204,37 @@ export default function Home({ resumeSession, onResume, onSelect }: HomeProps) {
           ))}
         </ul>
       )}
+
+      {/* Bottom row */}
+      <div className="mt-auto pt-section flex flex-col items-center gap-4">
+        {isLoggedIn ? (
+          <>
+            {onCreateScenario && (
+              <button
+                onClick={onCreateScenario}
+                className="font-sans text-sm text-text-secondary/70 underline underline-offset-2 active:opacity-50 transition-opacity"
+              >
+                Создать свой сценарий
+              </button>
+            )}
+            {onProgressPress && (
+              <button
+                onClick={onProgressPress}
+                className="font-sans text-sm text-text-secondary/50 underline underline-offset-2 active:opacity-50 transition-opacity"
+              >
+                Посмотреть прогресс
+              </button>
+            )}
+          </>
+        ) : onLoginPress ? (
+          <button
+            onClick={onLoginPress}
+            className="font-sans text-sm text-text-secondary/70 underline underline-offset-2 active:opacity-50 transition-opacity"
+          >
+            Войти, чтобы сохранить прогресс на других устройствах
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

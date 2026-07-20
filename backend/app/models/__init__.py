@@ -4,5 +4,6 @@ from app.models.scenario import Scenario
 from app.models.session import Session
 from app.models.message import Message
 from app.models.session_review import SessionReview
+from app.models.verification_code import VerificationCode
 
-__all__ = ["Base", "User", "Scenario", "Session", "Message", "SessionReview"]
+__all__ = ["Base", "User", "Scenario", "Session", "Message", "SessionReview", "VerificationCode"]

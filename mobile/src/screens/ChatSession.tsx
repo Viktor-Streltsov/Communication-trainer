@@ -4,6 +4,7 @@ import StrictnessBadge from '../components/StrictnessBadge';
 import type { StrictnessLevel, StrictnessVariant } from '../components/StrictnessBadge';
 import type { ReviewData } from './SessionReview';
 import { getVoiceService } from '../services/voice';
+import { apiFetch } from '../services/api';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,7 +46,6 @@ export default function ChatSession({
   const [speaking, setSpeaking]   = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
-  const baseUrl   = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -112,9 +112,8 @@ export default function ChatSession({
     setSending(true);
 
     try {
-      const res = await fetch(`${baseUrl}/chat/message`, {
+      const res = await apiFetch('/chat/message', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId, text }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -143,9 +142,8 @@ export default function ChatSession({
 
     setSending(true);
     try {
-      const res = await fetch(`${baseUrl}/chat/end`, {
+      const res = await apiFetch('/chat/end', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

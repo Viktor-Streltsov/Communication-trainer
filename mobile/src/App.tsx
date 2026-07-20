@@ -10,8 +10,22 @@ import type { Difficulty, PendingScenario } from './screens/DifficultySelect';
 import ChatSession from './screens/ChatSession';
 import SessionReview from './screens/SessionReview';
 import type { ReviewData } from './screens/SessionReview';
+import EmailStep from './screens/auth/EmailStep';
+import CodeStep from './screens/auth/CodeStep';
+import ProgressHistory from './screens/ProgressHistory';
+import CreateScenario from './screens/CreateScenario';
 import type { StrictnessLevel, StrictnessVariant } from './components/StrictnessBadge';
 import { storageGet, storageSet } from './services/storage';
+import { apiFetch, AUTH_TOKEN_KEY, AUTH_USER_KEY } from './services/api';
+import {
+  recordActivity,
+  cancelReminder,
+  scheduleReminder,
+  requestPermission,
+  markPermissionAsked,
+  hasAskedPermission,
+  incrementSessionsDone,
+} from './services/notifications';
 
 // ---------------------------------------------------------------------------
 // Navigation state machine
@@ -20,9 +34,10 @@ import { storageGet, storageSet } from './services/storage';
 //          ↓ (flag set)
 //         home → difficulty → chat → review → home
 //                                           ↘ difficulty (retry)
+//         home → auth-email → auth-code → home
 // ---------------------------------------------------------------------------
 
-type Screen = 'boot' | 'onboarding' | 'home' | 'difficulty' | 'chat' | 'review';
+type Screen = 'boot' | 'onboarding' | 'home' | 'difficulty' | 'chat' | 'review' | 'auth-email' | 'auth-code' | 'progress' | 'create-scenario';
 
 const ONBOARDING_KEY = 'onboarding_completed';
 const SESSION_KEY    = 'active_session';
@@ -59,22 +74,38 @@ export default function App() {
   const [pending, setPending]         = useState<PendingScenario | null>(null);
   const [lastScenarioId, setLastScenarioId] = useState<string>('');
   const [resumeReady, setResumeReady] = useState(false);
-
-  const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+  const [isLoggedIn, setIsLoggedIn]   = useState(false);
+  const [authEmail, setAuthEmail]     = useState('');
+  const [notifPromptVisible, setNotifPromptVisible] = useState(false);
 
   // ── Boot ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     async function init() {
-      const done = await storageGet(ONBOARDING_KEY);
-      const raw  = await storageGet(SESSION_KEY);
+      const done  = await storageGet(ONBOARDING_KEY);
+      const raw   = await storageGet(SESSION_KEY);
+      const token = await storageGet(AUTH_TOKEN_KEY);
       if (raw) {
         try { setSession(JSON.parse(raw) as ResumeSession); } catch { /* ignore */ }
       }
+      if (token) setIsLoggedIn(true);
+
+      // Record this visit, cancel any stale notification, reschedule
+      await recordActivity();
+      await cancelReminder();
+      await scheduleReminder();
+
       setScreen(done === 'true' ? 'home' : 'onboarding');
       setResumeReady(true);
     }
     init();
   }, []);
+
+  // ── Reschedule when user lands on Home ───────────────────────────────────
+  useEffect(() => {
+    if (screen === 'home') {
+      scheduleReminder();
+    }
+  }, [screen]);
 
   // ── Onboarding ───────────────────────────────────────────────────────────
   async function advanceOnboarding() {
@@ -98,12 +129,39 @@ export default function App() {
     await startSession(pending.scenario_id, difficulty);
   }
 
+  // ── Auth flow ─────────────────────────────────────────────────────────────
+  function handleLoginPress() {
+    setScreen('auth-email');
+  }
+
+  function handleEmailSent(email: string) {
+    setAuthEmail(email);
+    setScreen('auth-code');
+  }
+
+  function handleAuthSuccess() {
+    setIsLoggedIn(true);
+    setScreen('home');
+  }
+
+  function handleProgressPress() {
+    setScreen('progress');
+  }
+
+  function handleCreateScenarioPress() {
+    setScreen('create-scenario');
+  }
+
+  function handleScenarioCreated(scenario: PendingScenario) {
+    setPending(scenario);
+    setScreen('difficulty');
+  }
+
   // ── Start session (called from difficulty confirm or retry) ───────────────
   async function startSession(scenarioId: string, difficulty: Difficulty = 'medium') {
     try {
-      const res = await fetch(`${baseUrl}/chat/start`, {
+      const res = await apiFetch('/chat/start', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scenario_id: scenarioId, difficulty }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -140,6 +198,13 @@ export default function App() {
     setSession(null);
     setReview(reviewData);
     setScreen('review');
+
+    // After the first completed session, surface the notification permission
+    // prompt on the way back to Home (if not already asked).
+    const count = await incrementSessionsDone();
+    if (count === 1 && !(await hasAskedPermission())) {
+      setNotifPromptVisible(true);
+    }
   }
 
   // ── Review: back to home ──────────────────────────────────────────────────
@@ -218,12 +283,101 @@ export default function App() {
     );
   }
 
+  // ── Progress history ──────────────────────────────────────────────────────
+  if (screen === 'progress') {
+    return <ProgressHistory onBack={() => setScreen('home')} />;
+  }
+
+  // ── Create custom scenario ────────────────────────────────────────────────
+  if (screen === 'create-scenario') {
+    return (
+      <CreateScenario
+        onSuccess={handleScenarioCreated}
+        onBack={() => setScreen('home')}
+      />
+    );
+  }
+
+  // ── Auth screens ─────────────────────────────────────────────────────────
+  if (screen === 'auth-email') {
+    return (
+      <EmailStep
+        onCodeSent={handleEmailSent}
+        onBack={() => setScreen('home')}
+      />
+    );
+  }
+
+  if (screen === 'auth-code') {
+    return (
+      <CodeStep
+        email={authEmail}
+        onSuccess={handleAuthSuccess}
+        onBack={() => setScreen('auth-email')}
+      />
+    );
+  }
+
   // ── Home (default) ────────────────────────────────────────────────────────
   return (
-    <Home
-      resumeSession={session}
-      onResume={handleResume}
-      onSelect={handleScenarioSelect}
-    />
+    <div className="relative">
+      <Home
+        resumeSession={session}
+        onResume={handleResume}
+        onSelect={handleScenarioSelect}
+        isLoggedIn={isLoggedIn}
+        onLoginPress={handleLoginPress}
+        onProgressPress={handleProgressPress}
+        onCreateScenario={handleCreateScenarioPress}
+      />
+      {notifPromptVisible && (
+        <NotifPromptBanner
+          onAccept={async () => {
+            await markPermissionAsked();
+            setNotifPromptVisible(false);
+            const granted = await requestPermission();
+            if (granted) await scheduleReminder();
+          }}
+          onDecline={async () => {
+            await markPermissionAsked();
+            setNotifPromptVisible(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NotifPromptBanner — appears once after the first completed session
+// ---------------------------------------------------------------------------
+
+interface NotifPromptBannerProps {
+  onAccept: () => void;
+  onDecline: () => void;
+}
+
+function NotifPromptBanner({ onAccept, onDecline }: NotifPromptBannerProps) {
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-surface border-t border-text-secondary/10 px-6 py-5 flex flex-col gap-3 shadow-sm">
+      <p className="font-sans text-sm text-text-primary leading-relaxed">
+        Показать напоминание, если давно не заходил?{' '}
+        <span className="text-text-secondary">Без спама — максимум раз в несколько дней.</span>
+      </p>
+      <div className="flex gap-3">
+        <button
+          onClick={onAccept}
+          className="flex-1 bg-button-primary text-button-primary-text font-sans text-sm font-medium py-3 rounded-card active:opacity-80 transition-opacity"
+        >
+          Да, хорошо
+        </button>
+        <button
+          onClick={onDecline}
+          className="flex-1 bg-transparent text-text-secondary font-sans text-sm py-3 rounded-card active:opacity-60 transition-opacity"
+        >
+          Нет, спасибо
+        </button>
+      </div>
+    </div>
   );
 }

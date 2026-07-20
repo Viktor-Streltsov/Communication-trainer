@@ -6,12 +6,16 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import or_
+
 from app.db import get_db
 from app.models.message import Message
 from app.models.scenario import Scenario
 from app.models.session import Session as ChatSession
 from app.models.session_review import SessionReview
+from app.models.user import User
 from app.services.analysis import analyse_session
+from app.services.auth_dependency import get_current_user_optional
 from app.services.llm_client import llm_client
 from app.services.persona_prompts import DIFFICULTY_MODIFIERS
 from app.services.random_traits import pick_trait, revealed_hint
@@ -80,10 +84,13 @@ class ReviewResponse(BaseModel):
 async def start_session(
     body: StartRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> StartResponse:
     """
     Create a new dialogue session for the given scenario.
     Saves the session and opening AI message to the database.
+    If a valid JWT is supplied the session is linked to the authenticated user;
+    otherwise it is created anonymously (user_id=None).
     """
     result = await db.execute(select(Scenario).where(Scenario.code == body.scenario_id))
     scenario = result.scalar_one_or_none()
@@ -96,7 +103,12 @@ async def start_session(
 
     difficulty = body.difficulty if body.difficulty in ("soft", "medium", "hard") else "medium"
     trait = pick_trait(scenario.role_type)
-    session = ChatSession(scenario_id=scenario.id, difficulty=difficulty, random_trait=trait or None)
+    session = ChatSession(
+        scenario_id=scenario.id,
+        difficulty=difficulty,
+        random_trait=trait or None,
+        user_id=current_user.id if current_user else None,
+    )
     db.add(session)
     await db.flush()  # get session.id before adding messages
 
@@ -303,9 +315,22 @@ async def get_review(
 
 
 @router.get("/scenarios")
-async def list_scenarios(db: AsyncSession = Depends(get_db)) -> list[dict]:
-    """Return all available scenarios from the database."""
-    result = await db.execute(select(Scenario).order_by(Scenario.title))
+async def list_scenarios(
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+) -> list[dict]:
+    """Return system scenarios plus the current user's custom scenarios (if authenticated)."""
+    if current_user is not None:
+        visibility = or_(
+            Scenario.owner_user_id.is_(None),
+            Scenario.owner_user_id == current_user.id,
+        )
+    else:
+        visibility = Scenario.owner_user_id.is_(None)
+
+    result = await db.execute(
+        select(Scenario).where(visibility).order_by(Scenario.title)
+    )
     scenarios = result.scalars().all()
     return [
         {
